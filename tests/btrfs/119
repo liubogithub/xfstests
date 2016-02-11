@@ -1,0 +1,106 @@
+#! /bin/bash
+# FS QA Test 119
+#
+# Basic test for 'nosharecache' option.
+#
+#-----------------------------------------------------------------------
+# Copyright (c) 2016 Liu Bo.  All Rights Reserved.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it would be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write the Free Software Foundation,
+# Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+#-----------------------------------------------------------------------
+#
+
+seq=`basename $0`
+seqres=$RESULT_DIR/$seq
+echo "QA output created by $seq"
+
+here=`pwd`
+tmp=/tmp/$$
+status=1	# failure is the default!
+trap "_cleanup; exit \$status" 0 1 2 3 15
+
+_cleanup()
+{
+	cd /
+	rm -f $tmp.*
+	rm -fr /tmp/btrfsmp_*
+}
+
+# get standard environment, filters and checks
+. ./common/rc
+. ./common/filter
+
+# remove previous $seqres.full before test
+rm -f $seqres.full
+
+# real QA test starts here
+
+# Modify as appropriate.
+_supported_fs btrfs
+_supported_os Linux
+_require_scratch
+_require_selinux
+
+_scratch_mkfs >> $seqres.full 2>&1
+_scratch_mount
+
+# mark root directory
+touch $SCRATCH_MNT/root_flag
+
+# create subvolumes/snapshots: sub, snap_sub, snap_root
+SUB=("sub" "snap_sub" "snap_root")
+$BTRFS_UTIL_PROG subvolume create $SCRATCH_MNT/${SUB[0]} >>$seqres.full 2>&1
+touch $SCRATCH_MNT/${SUB[0]}/${SUB[0]}_flag
+mkdir -p $SCRATCH_MNT/dir
+$BTRFS_UTIL_PROG subvolume snap $SCRATCH_MNT/${SUB[0]} $SCRATCH_MNT/dir/${SUB[1]} >>$seqres.full 2>&1
+touch $SCRATCH_MNT/dir/${SUB[1]}/${SUB[1]}_flag
+$BTRFS_UTIL_PROG subvolume snap $SCRATCH_MNT $SCRATCH_MNT/dir/${SUB[2]} >>$seqres.full 2>&1
+touch $SCRATCH_MNT/dir/${SUB[2]}/${SUB[2]}_flag
+
+# Get ID and mountpoint
+SUBID=()
+SUBMP=()
+SUBID[0]=`$BTRFS_UTIL_PROG subvolume list $SCRATCH_MNT | awk '/path [[:alnum:]/]*(sub)/ {print $2}'`
+SUBMP[0]="/tmp/btrfsmp_$RANDOM"
+SUBID[1]=`$BTRFS_UTIL_PROG subvolume list $SCRATCH_MNT | awk '/path [[:alnum:]/]*(snap_sub)/ {print $2}'`
+SUBMP[1]="/tmp/btrfsmp_$RANDOM"
+SUBID[2]=`$BTRFS_UTIL_PROG subvolume list $SCRATCH_MNT | awk '/path [[:alnum:]/]*(snap_root)/ {print $2}'`
+SUBMP[2]="/tmp/btrfsmp_$RANDOM"
+
+ls -lZ $SCRATCH_MNT >> $seqres.full 2>&1
+# mount subvolumes/snapshots with 'nosharecache' option
+for ((i = 0; i < ${#SUB[@]}; i++)) do
+	mkdir -p ${SUBMP[$i]}
+	$MOUNT_PROG -osubvolid=${SUBID[$i]},nosharecache=${SUBID[$i]} $SCRATCH_DEV ${SUBMP[$i]}
+	ls -lZ ${SUBMP[$i]} >> $seqres.full 2>&1
+done
+
+_scratch_unmount
+# umount the above items as the order (root, sub, snap_root, snap_sub)
+for ((i = 0; i < ${#SUB[@]}; i++)) do
+	$UMOUNT_PROG ${SUBMP[$i]}
+	rm -fr ${SUBMP[$i]}
+done
+
+_scratch_mount
+
+# optional stuff if your test has verbose output to help resolve problems
+#echo
+#echo "If failure, check $seqres.full (this) and $seqres.full.ok (reference)"
+_check_scratch_fs
+
+# success, all done
+echo "Silence is golden"
+status=0
+exit

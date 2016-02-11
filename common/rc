@@ -2977,6 +2977,17 @@ _require_test_lsattr()
 		_notrun "lsattr not supported by test filesystem type: $FSTYP"
 }
 
+_require_selinux()
+{
+	if [ -x /usr/sbin/selinuxenabled ] && /usr/sbin/selinuxenabled; then
+		if [ $? -eq 1 ]; then
+			_notrun "this test requires selinux support"
+		fi
+	else 
+		_notrun "this test requires selinux support"
+	fi
+}
+
 _get_total_inode()
 {
 	if [ -z "$1" ]; then
